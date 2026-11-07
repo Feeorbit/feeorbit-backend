@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Environment Variables and Credentials (STRICTLY FORBIDDEN FROM COMMITS)
+.env
+.env.*
+*.env
+
+# Keep clean template
+!.env.example
+
+# Uploads & Media Storage (keep folders via .gitkeep, ignore actual user uploads)
+public/uploads/*
+!public/uploads/.gitkeep
+src/public/uploads/*
+!src/public/uploads/.gitkeep
+
+# Logs and Debug
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database Dumps and Backups
+*.dump
+*.bson
+*.json.bak
+*.bak
+*.zip
+*.tar.gz
+
+# Scratch & Temporary Testing Scripts
+scratch/
+.system_generated/
+*.tmp
+
+# IDE & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

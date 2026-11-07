@@ -1,3 +1,11 @@
+const dns = require('dns');
+// Set public DNS servers to resolve MongoDB Atlas SRV records reliably across all platforms
+try {
+  dns.setServers(['8.8.8.8', '1.1.1.1']);
+} catch (e) {
+  // Ignore if restricted
+}
+
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -83,14 +91,35 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/store', productRoutes);
 app.use('/api/payroll', payrollRoutes);
 
-// Health check
+let lastMongoError = null;
+let isConnecting = false;
+
+// Health check endpoint (always responds even if DB is still connecting)
 app.get('/api/health', (req, res) => {
+  const isConnected = mongoose.connection.readyState === 1;
   res.json({
     status: 'online',
     timestamp: new Date(),
-    service: 'GymPulse Management API',
-    mongoStatus: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    service: 'FeeOrbit Management API',
+    mongoStatus: isConnected ? 'connected' : (isConnecting ? 'connecting' : 'disconnected'),
+    mongoError: isConnected ? null : lastMongoError,
   });
+});
+
+// Database gate: gracefully inform callers if database is temporarily unavailable instead of crashing
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health' || req.path.startsWith('/webhooks')) {
+    return next();
+  }
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'FeeOrbit Database is initializing or reconnecting. Please try again in a moment.',
+      mongoStatus: isConnecting ? 'connecting' : 'disconnected',
+      error: lastMongoError,
+    });
+  }
+  next();
 });
 
 // 404 Handler
@@ -107,36 +136,56 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Database Connection & Server Start
+// Database Connection with Auto-Retry (Never crash the cloud container!)
 const connectDB = async () => {
+  if (mongoose.connection.readyState === 1) return;
+  isConnecting = true;
   try {
-    await mongoose.connect(MONGODB_URI);
-    console.log(`✅ MongoDB Connected (${MONGODB_URI.includes('mongodb+srv') ? 'Atlas Cloud' : 'Local'})`);
+    console.log(`🔌 Attempting MongoDB connection: ${MONGODB_URI.includes('mongodb+srv') ? 'Atlas Cloud' : 'Local'}...`);
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 8000,
+    });
+    lastMongoError = null;
+    console.log(`✅ MongoDB Connected Successfully (${MONGODB_URI.includes('mongodb+srv') ? 'Atlas Cloud' : 'Local'})`);
   } catch (err) {
+    lastMongoError = err.message;
     console.warn(`⚠️ Primary MongoDB connection failed: ${err.message}`);
+
     if (process.env.NODE_ENV !== 'production' && MONGODB_URI !== 'mongodb://127.0.0.1:27017/gym_pulse_db') {
       try {
         console.log('🔄 Retrying with local MongoDB fallback...');
-        await mongoose.connect('mongodb://127.0.0.1:27017/gym_pulse_db');
+        await mongoose.connect('mongodb://127.0.0.1:27017/gym_pulse_db', {
+          serverSelectionTimeoutMS: 3000,
+        });
+        lastMongoError = null;
         console.log('✅ Connected to local MongoDB fallback successfully.');
+        isConnecting = false;
+        return;
       } catch (localErr) {
-        console.error('❌ Local MongoDB fallback also failed:', localErr.message);
-        process.exit(1);
+        console.warn('⚠️ Local MongoDB fallback also failed:', localErr.message);
       }
-    } else {
-      process.exit(1);
     }
-  }
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 FeeOrbit API & Chat Server running on port ${PORT}`);
-    console.log(`📍 Health check available at http://localhost:${PORT}/api/health`);
-  });
-  // Prevent premature socket closing during Gemini AI generation
-  server.keepAliveTimeout = 120000;
-  server.headersTimeout = 125000;
-  server.timeout = 120000;
+    // On cloud platforms (Render/Railway), keep HTTP server alive and retry in background
+    console.log('🔄 Will retry MongoDB connection in 10 seconds (keeping server alive)...');
+    setTimeout(() => {
+      isConnecting = false;
+      connectDB();
+    }, 10000);
+  } finally {
+    isConnecting = false;
+  }
 };
 
-connectDB();
+// Start HTTP Server immediately so Render port binding succeeds instantly
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 FeeOrbit API & Chat Server running on port ${PORT}`);
+  console.log(`📍 Health check available at http://localhost:${PORT}/api/health`);
+  connectDB();
+});
+
+// Prevent premature socket closing during Gemini AI generation
+server.keepAliveTimeout = 120000;
+server.headersTimeout = 125000;
+server.timeout = 120000;
 

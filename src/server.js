@@ -106,6 +106,8 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date(),
     service: 'FeeOrbit Management API',
     mongoStatus: isConnected ? 'connected' : (isConnecting ? 'connecting' : 'disconnected'),
+    databaseName: isConnected ? mongoose.connection.db?.databaseName : null,
+    mongoHost: isConnected ? mongoose.connection.host : null,
     mongoError: isConnected ? null : lastMongoError,
   });
 });

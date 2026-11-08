@@ -46,6 +46,7 @@ const chatRoutes = require('./routes/chatRoutes');
 const feedbackRoutes = require('./routes/feedbackRoutes');
 const productRoutes = require('./routes/productRoutes');
 const payrollRoutes = require('./routes/payrollRoutes');
+const { setupSwagger } = require('./config/swagger');
 
 const app = express();
 const server = http.createServer(app);
@@ -91,6 +92,9 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/store', productRoutes);
 app.use('/api/payroll', payrollRoutes);
 
+// Interactive OpenAPI & Swagger Documentation
+setupSwagger(app);
+
 let lastMongoError = null;
 let isConnecting = false;
 
@@ -108,7 +112,12 @@ app.get('/api/health', (req, res) => {
 
 // Database gate: gracefully inform callers if database is temporarily unavailable instead of crashing
 app.use('/api', (req, res, next) => {
-  if (req.path === '/health' || req.path.startsWith('/webhooks')) {
+  if (
+    req.path === '/health' ||
+    req.path.startsWith('/docs') ||
+    req.path.startsWith('/api-docs') ||
+    req.path.startsWith('/webhooks')
+  ) {
     return next();
   }
   if (mongoose.connection.readyState !== 1) {
@@ -142,11 +151,15 @@ const connectDB = async () => {
   isConnecting = true;
   try {
     console.log(`🔌 Attempting MongoDB connection: ${MONGODB_URI.includes('mongodb+srv') ? 'Atlas Cloud' : 'Local'}...`);
-    await mongoose.connect(MONGODB_URI, {
+    const connectOptions = {
       serverSelectionTimeoutMS: 8000,
-    });
+    };
+    if (MONGODB_URI.includes('mongodb+srv') || !MONGODB_URI.includes('gym_pulse_db')) {
+      connectOptions.dbName = 'feeorbit_db';
+    }
+    await mongoose.connect(MONGODB_URI, connectOptions);
     lastMongoError = null;
-    console.log(`✅ MongoDB Connected Successfully (${MONGODB_URI.includes('mongodb+srv') ? 'Atlas Cloud' : 'Local'})`);
+    console.log(`✅ MongoDB Connected Successfully (${MONGODB_URI.includes('mongodb+srv') ? 'Atlas Cloud [feeorbit_db]' : 'Local'})`);
   } catch (err) {
     lastMongoError = err.message;
     console.warn(`⚠️ Primary MongoDB connection failed: ${err.message}`);

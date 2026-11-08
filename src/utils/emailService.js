@@ -103,7 +103,7 @@ const sendVerificationOtpEmail = async ({ toEmail, toName, otpCode }) => {
  * Staff / Trainer Invitation Email
  */
 const sendStaffInviteEmail = async ({ toEmail, toName, gymName, role, temporaryPassword, loginUrl }) => {
-  const portalUrl = loginUrl || 'http://localhost:3000/login';
+  const portalUrl = loginUrl || (process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/login` : 'http://localhost:3000/login');
   const htmlContent = `
     <!DOCTYPE html>
     <html>
@@ -158,7 +158,7 @@ const sendStaffInviteEmail = async ({ toEmail, toName, gymName, role, temporaryP
  * Member Onboarding & Welcome Invite Email
  */
 const sendMemberWelcomeInviteEmail = async ({ toEmail, toName, gymName, memberId, planName, temporaryPassword, loginUrl }) => {
-  const portalUrl = loginUrl || 'http://localhost:3000/login';
+  const portalUrl = loginUrl || (process.env.FRONTEND_URL ? `${process.env.FRONTEND_URL}/login` : 'http://localhost:3000/login');
   const htmlContent = `
     <!DOCTYPE html>
     <html>

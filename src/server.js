@@ -1,11 +1,3 @@
-const dns = require('dns');
-// Set public DNS servers to resolve MongoDB Atlas SRV records reliably across all platforms
-try {
-  dns.setServers(['8.8.8.8', '1.1.1.1']);
-} catch (e) {
-  // Ignore if restricted
-}
-
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -147,21 +139,49 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Automatically resolve and convert MongoDB Atlas srv URIs into resilient standard replica set URIs
+// to permanently eliminate the notorious Render/Docker 'querySrv ENOTFOUND' DNS resolution bug
+function formatMongoUri(rawUri) {
+  if (!rawUri) return rawUri;
+
+  // FeeOrbit cluster (4h6pg2a)
+  if (rawUri.includes('4h6pg2a.mongodb.net') && rawUri.startsWith('mongodb+srv://')) {
+    const authMatch = rawUri.match(/mongodb\+srv:\/\/([^@]+)@/);
+    const auth = authMatch ? authMatch[1] : '';
+    const dbMatch = rawUri.match(/4h6pg2a\.mongodb\.net\/([^?]*)/);
+    const db = (dbMatch && dbMatch[1] && dbMatch[1].trim()) ? dbMatch[1].trim() : 'feeorbit_db';
+    return `mongodb://${auth}@ac-c7nolfp-shard-00-00.4h6pg2a.mongodb.net:27017,ac-c7nolfp-shard-00-01.4h6pg2a.mongodb.net:27017,ac-c7nolfp-shard-00-02.4h6pg2a.mongodb.net:27017/${db}?ssl=true&replicaSet=atlas-h4g5zb-shard-0&authSource=admin&retryWrites=true&w=majority`;
+  }
+
+  // Digniflow cluster (bqrqg57)
+  if (rawUri.includes('bqrqg57.mongodb.net') && rawUri.startsWith('mongodb+srv://')) {
+    const authMatch = rawUri.match(/mongodb\+srv:\/\/([^@]+)@/);
+    const auth = authMatch ? authMatch[1] : '';
+    const dbMatch = rawUri.match(/bqrqg57\.mongodb\.net\/([^?]*)/);
+    const db = (dbMatch && dbMatch[1] && dbMatch[1].trim()) ? dbMatch[1].trim() : 'feeorbit_db';
+    return `mongodb://${auth}@ac-rlk7dzr-shard-00-00.bqrqg57.mongodb.net:27017,ac-rlk7dzr-shard-00-01.bqrqg57.mongodb.net:27017,ac-rlk7dzr-shard-00-02.bqrqg57.mongodb.net:27017/${db}?ssl=true&replicaSet=atlas-tsx2ni-shard-0&authSource=admin&retryWrites=true&w=majority`;
+  }
+
+  return rawUri;
+}
+
 // Database Connection with Auto-Retry (Never crash the cloud container!)
 const connectDB = async () => {
   if (mongoose.connection.readyState === 1) return;
   isConnecting = true;
+  const targetUri = formatMongoUri(MONGODB_URI);
   try {
-    console.log(`🔌 Attempting MongoDB connection: ${MONGODB_URI.includes('mongodb+srv') ? 'Atlas Cloud' : 'Local'}...`);
+    const isCloud = targetUri.includes('mongodb.net');
+    console.log(`🔌 Attempting MongoDB connection: ${isCloud ? 'Atlas Cloud' : 'Local'}...`);
     const connectOptions = {
       serverSelectionTimeoutMS: 8000,
     };
-    if (MONGODB_URI.includes('mongodb+srv') || !MONGODB_URI.includes('gym_pulse_db')) {
+    if (isCloud || !targetUri.includes('gym_pulse_db')) {
       connectOptions.dbName = 'feeorbit_db';
     }
-    await mongoose.connect(MONGODB_URI, connectOptions);
+    await mongoose.connect(targetUri, connectOptions);
     lastMongoError = null;
-    console.log(`✅ MongoDB Connected Successfully (${MONGODB_URI.includes('mongodb+srv') ? 'Atlas Cloud [feeorbit_db]' : 'Local'})`);
+    console.log(`✅ MongoDB Connected Successfully (${isCloud ? 'Atlas Cloud [feeorbit_db]' : 'Local'})`);
   } catch (err) {
     lastMongoError = err.message;
     console.warn(`⚠️ Primary MongoDB connection failed: ${err.message}`);
